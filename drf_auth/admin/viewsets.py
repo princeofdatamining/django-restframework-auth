@@ -31,7 +31,7 @@ class UserViewSet(admin_router.perform_mixin, viewsets.ModelViewSet):
     """
 
     permission_classes = [permissions.IsAdminUser]
-    queryset = dao.get_lazy_queryset(None)
+    # queryset = dao.get_lazy_queryset(None)
     serializer_class = serializers.UserForAdminSerializer
 
     extra_permission_classes = {
@@ -42,6 +42,9 @@ class UserViewSet(admin_router.perform_mixin, viewsets.ModelViewSet):
         'create': serializers.CreateStaffSerializer,
         'password': serializers.PasswordResetSerializer,
     }
+
+    def get_queryset(self):
+        return dao.get_queryset(None).order_by('id')
 
     @admin_router.action(['put'], detail=True)
     @admin_router.perform_decorator()
