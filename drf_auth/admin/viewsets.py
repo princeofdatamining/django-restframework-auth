@@ -34,6 +34,7 @@ class UserViewSet(admin_router.perform_mixin, viewsets.ModelViewSet):
     # queryset = dao.get_lazy_queryset(None)
     lookup_field = 'username'
     serializer_class = serializers.UserForAdminSerializer
+    search_fields = ['username']
 
     extra_permission_classes = {
         'create': [IsSuperUser],
