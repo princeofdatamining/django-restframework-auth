@@ -8,7 +8,12 @@ from rest_framework import validators
 from applus.django import dao
 
 # pylint: disable=invalid-name
+user_model = dao.get_lazy_model(None)
 user_dao = dao.get_lazy_dao(None)
+token_model = dao.get_lazy_model("authtoken.token")
+token_dao = dao.get_lazy_dao(
+    "authtoken.token",
+    "applus.rest_framework.authtoken.AuthTokenManager")
 
 
 class BaseUserSerializer(serializers.ModelSerializer):
@@ -16,7 +21,7 @@ class BaseUserSerializer(serializers.ModelSerializer):
 
     # pylint: disable=missing-docstring
     class Meta:
-        model = dao.get_lazy_model(None)
+        model = user_model
         fields = ['username']
 
 
@@ -26,6 +31,7 @@ class LoginUserSerializer(BaseUserSerializer):
     default_error_messages = {
         'invalid_username': "帐号/密码不正确。",
         'invalid_password': "帐号/密码不正确。",
+        'is_not_active': "帐号禁用中。",
     }
 
     # pylint: disable=missing-docstring
@@ -53,6 +59,8 @@ class LoginUserSerializer(BaseUserSerializer):
             self._user = user_dao.get(username=value)
         except user_dao.model.DoesNotExist:
             self.fail('invalid_username')
+        if not self._user.is_active:
+            self.fail('is_not_active')
         return value
 
     def validate_password(self, value):
@@ -72,7 +80,7 @@ class ProfileUserSerializer(BaseUserSerializer):
 
     # pylint: disable=missing-docstring
     class Meta(BaseUserSerializer.Meta):
-        fields = ['username']
+        fields = ['username', 'email', 'is_superuser', 'is_staff', 'date_joined']
 
 
 class TokenSerializer(serializers.ModelSerializer):
@@ -80,8 +88,30 @@ class TokenSerializer(serializers.ModelSerializer):
 
     # pylint: disable=missing-docstring
     class Meta:
-        model = dao.get_lazy_model("authtoken.token")
+        model = token_model
         fields = ["key"]
+
+
+class TokenChangeSerializer(serializers.Serializer):
+    """ 更换令牌 """
+
+    default_error_messages = {
+        'password_incorrect': _("Password confirmation"),
+    }
+
+    password = serializers.CharField()
+
+    def validate_password(self, value):
+        """ 检查密码 """
+        if not self.instance.check_password(value):
+            self.fail('password_incorrect')
+        return value
+
+    def update(self, instance, validated_data):
+        """ 更新 """
+        token = token_dao.refresh(user_id=instance.id)
+        setattr(instance, 'token', token)
+        return instance
 
 
 class UserForAdminSerializer(BaseUserSerializer):
@@ -89,7 +119,7 @@ class UserForAdminSerializer(BaseUserSerializer):
 
     # pylint: disable=missing-docstring
     class Meta(BaseUserSerializer.Meta):
-        fields = ['id', 'username', 'email', 'is_staff', 'is_active', 'date_joined']
+        fields = ['id', 'username', 'email', 'is_superuser', 'is_staff', 'is_active', 'date_joined']
 
 
 class PasswordResetSerializer(serializers.Serializer):
@@ -121,10 +151,10 @@ class PasswordChangeSerializer(PasswordResetSerializer):
             "Your old password was entered incorrectly. Please enter it again."),
     }
 
-    old_password = serializers.CharField()
+    password = serializers.CharField()
 
-    def validate_old_password(self, value):
-        """ 检查旧密码 """
+    def validate_password(self, value):
+        """ 检查密码 """
         if not self.instance.check_password(value):
             self.fail('password_incorrect')
         return value
@@ -145,13 +175,15 @@ class CreateUserSerializer(PasswordResetSerializer):
             self.fail('username_exists')
         return value
 
-    def init_user(self):
-        """ 创建实例(不提交) """
-        return user_dao.model(username=self.validated_data['username'])
+    # pylint: disable=no-self-use
+    def init_user(self, user):
+        """ 非管理员 """
+        return user
 
     def save(self, **kwargs):
         """ 创建 """
-        user = self.init_user()
+        user = user_dao.model(username=self.validated_data['username'])
+        self.init_user(user)
         user.set_password(self.validated_data['new_password'])
         user.save()
         return user
@@ -160,8 +192,20 @@ class CreateUserSerializer(PasswordResetSerializer):
 class CreateStaffSerializer(CreateUserSerializer):
     """ 创建管理员帐号 """
 
-    def init_user(self):
+    def init_user(self, user):
         """ 创建实例，并设置为管理员 """
-        user = super(CreateStaffSerializer, self).init_user()
         user.is_staff = True
         return user
+
+
+class IsActiveSerializer(serializers.Serializer):
+    """ 更新激活状态 """
+
+    is_active = serializers.BooleanField(write_only=True)
+
+    def update(self, instance, validated_data):
+        """ 更新 """
+        if instance.is_active != validated_data['is_active']:
+            instance.is_active = validated_data['is_active']
+            instance.save()
+        return instance

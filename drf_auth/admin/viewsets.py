@@ -1,23 +1,14 @@
 # -*- coding: utf-8 -*-
 """ 管理员 API """
 # pylint: disable=too-many-ancestors,unused-argument,no-self-use,invalid-name
+# pylint: disable=invalid-unary-operand-type
 from rest_framework import viewsets
-from rest_framework import permissions
 from applus.rest_framework import routers
-from applus.rest_framework.permissions import IsSuperUser
-from applus.django import dao
+from applus.rest_framework import permissions
 from .. import serializers
 
 
 admin_router = routers.PerformRouter()
-
-
-class IsSuperOrStaffSelf(permissions.IsAdminUser):
-    """ 仅允许超级用户、或管理员自己 """
-
-    def has_object_permission(self, request, view, obj):
-        """ 仅允许超级用户、或管理员自己 """
-        return request.user.is_superuser or request.user.id == obj.id
 
 
 @admin_router.register_decorator('users', base_name="admin-user", include="LCR")
@@ -31,22 +22,42 @@ class UserViewSet(admin_router.perform_mixin, viewsets.ModelViewSet):
     """
 
     permission_classes = [permissions.IsAdminUser]
-    # queryset = dao.get_lazy_queryset(None)
+    # queryset = serializers.user_dao
     lookup_field = 'username'
+    lookup_value_regex = '[^/]+' # 允许 email 形式 “master@qq.com”
     serializer_class = serializers.UserForAdminSerializer
+    filter_fields = ['is_superuser', 'is_staff', 'is_active']
     search_fields = ['username']
 
     extra_permission_classes = {
-        'create': [IsSuperUser],
-        'password': [IsSuperOrStaffSelf],
+        #
+        # 角色限定：超级管理员
+        'create': [permissions.IsSuperUser],
+        #
+        # 角色限定：运营人员
+        # 对象限定：普通用户、超级管理员对非超管
+        'password': [
+            permissions.IsAdminUser & (
+                ~permissions.ToAdmin |
+                (permissions.FromSuper & ~permissions.ToSuper)),
+        ],
+        #
+        # 角色限定：运营人员
+        # 对象限定：普通用户、超级管理员对非超管
+        'active': [
+            permissions.IsAdminUser & (
+                ~permissions.ToAdmin |
+                (permissions.FromSuper & ~permissions.ToSuper)),
+        ],
     }
     extra_serializer_classes = {
         'create': serializers.CreateStaffSerializer,
         'password': serializers.PasswordResetSerializer,
+        'active': serializers.IsActiveSerializer,
     }
 
     def get_queryset(self):
-        return dao.get_queryset(None).order_by('id')
+        return serializers.user_dao.order_by('id')
 
     @admin_router.action(['put'], detail=True)
     @admin_router.perform_decorator()
@@ -58,3 +69,13 @@ class UserViewSet(admin_router.perform_mixin, viewsets.ModelViewSet):
         """ 更新密码，并调整响应内容 """
         serializer.save()
         serializer._data = {}
+
+    @admin_router.action(['put'], detail=True)
+    @admin_router.perform_decorator()
+    def active(self, *args, **kwargs):
+        """ 通过 perform_extra_action 自动调用 perform_${ACTION} """
+
+    # pylint: disable=protected-access
+    def perform_active(self, serializer):
+        """ 更新激活状态 """
+        serializer.save()
