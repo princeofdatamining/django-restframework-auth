@@ -3,12 +3,19 @@
 # pylint: disable=too-many-ancestors,unused-argument,no-self-use,invalid-name
 # pylint: disable=invalid-unary-operand-type
 from rest_framework import viewsets
+from rest_framework.response import Response
 from applus.rest_framework import routers
 from applus.rest_framework import permissions
 from .. import serializers
 
 
 admin_router = routers.PerformRouter()
+
+# 角色限定：运营人员
+# 对象限定：普通用户、超级管理员对非超管
+Admin2userOrSuper2staff = permissions.IsAdminUser & (
+    ~permissions.ToAdmin |
+    (permissions.FromSuper & ~permissions.ToSuper))
 
 
 @admin_router.register_decorator('users', base_name="admin-user", include="LCR")
@@ -34,21 +41,16 @@ class UserViewSet(admin_router.perform_mixin, viewsets.ModelViewSet):
         # 角色限定：超级管理员
         'create': [permissions.IsSuperUser],
         #
-        # 角色限定：运营人员
-        # 对象限定：普通用户、超级管理员对非超管
-        'password': [
-            permissions.IsAdminUser & (
-                ~permissions.ToAdmin |
-                (permissions.FromSuper & ~permissions.ToSuper)),
-        ],
+        # 角色限定：超级管理员
+        'token': [permissions.IsSuperUser],
         #
         # 角色限定：运营人员
         # 对象限定：普通用户、超级管理员对非超管
-        'active': [
-            permissions.IsAdminUser & (
-                ~permissions.ToAdmin |
-                (permissions.FromSuper & ~permissions.ToSuper)),
-        ],
+        'password': [Admin2userOrSuper2staff],
+        #
+        # 角色限定：运营人员
+        # 对象限定：普通用户、超级管理员对非超管
+        'active': [Admin2userOrSuper2staff],
     }
     extra_serializer_classes = {
         'create': serializers.CreateStaffSerializer,
@@ -58,6 +60,14 @@ class UserViewSet(admin_router.perform_mixin, viewsets.ModelViewSet):
 
     def get_queryset(self):
         return serializers.user_dao.order_by('id')
+
+    @admin_router.action(['get'], detail=True)
+    def token(self, *args, **kwargs):
+        """ 获取令牌 """
+        instance = self.get_object()
+        token = serializers.token_dao.fetch(user_id=instance.id)
+        serializer = serializers.TokenSerializer(instance=token)
+        return Response(serializer.data)
 
     @admin_router.action(['put'], detail=True)
     @admin_router.perform_decorator()
