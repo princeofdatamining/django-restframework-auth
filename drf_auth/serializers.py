@@ -5,7 +5,7 @@ from django.utils.translation import gettext_lazy as _
 from django.contrib import auth
 from rest_framework import serializers
 from rest_framework import validators
-from applus.django import dao
+from applus.django.db.models import dao
 
 # pylint: disable=invalid-name
 user_model = dao.get_lazy_model(None)
