@@ -61,6 +61,7 @@ class AuthViewSet(router.perform_mixin, viewsets.ViewSet):
         'retoken': [permissions.IsAuthenticated],
     }
     extra_serializer_classes = {
+        'login': serializers.LoginUserSerializer,
         'password': serializers.PasswordChangeSerializer,
         'retoken': serializers.TokenChangeSerializer,
     }
