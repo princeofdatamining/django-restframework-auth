@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """ 用户帐号相关 """
 # pylint: disable=too-few-public-methods,abstract-method
+from django.conf import settings
 from django.utils.translation import gettext_lazy as _
 from django.contrib import auth
 from rest_framework import serializers
@@ -164,15 +165,25 @@ class CreateUserSerializer(PasswordResetSerializer):
     """ 检查帐号 """
 
     username = serializers.CharField()
+    email = serializers.EmailField()
 
-    def validate_username(self, value):
-        """ 检查帐号是否存在 """
+    def _validate_exists(self, **kwargs):
+        """ 检查是否存在 """
         try:
-            user_dao.get(username=value)
+            user_dao.get(**kwargs)
         except user_dao.model.DoesNotExist:
             pass
         else:
             self.fail('username_exists')
+
+    def validate_username(self, value):
+        """ 检查帐号是否存在 """
+        self._validate_exists(username=value)
+        return value
+
+    def validate_email(self, value):
+        """ 检查邮箱是否存在 """
+        self._validate_exists(email=value)
         return value
 
     # pylint: disable=no-self-use
@@ -182,15 +193,27 @@ class CreateUserSerializer(PasswordResetSerializer):
 
     def save(self, **kwargs):
         """ 创建 """
-        user = user_dao.model(username=self.validated_data['username'])
+        values = self.validated_data.copy()
+        password = values.pop("new_password")
+        user = user_dao.model(**values)
         self.init_user(user)
-        user.set_password(self.validated_data['new_password'])
+        user.set_password(password)
         user.save()
         return user
 
 
 class CreateStaffSerializer(CreateUserSerializer):
     """ 创建管理员帐号 """
+
+    def to_internal_value(self, data):
+        """ 没有 email 时自动处理 """
+        if "email" not in data and isinstance(data.get("username"), str):
+            try:
+                suffix = settings.PROJ_DOMAIN
+            except AttributeError:
+                suffix = None
+            data["email"] = data["username"] + '@' + (suffix or "localhost")
+        return super().to_internal_value(data)
 
     def init_user(self, user):
         """ 创建实例，并设置为管理员 """
